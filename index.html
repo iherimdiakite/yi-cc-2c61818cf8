@@ -4,6 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no,maximum-scale=1">
 <meta name="theme-color" content="#120a20">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Cache-cache">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
 <meta name="robots" content="noindex">
 <title>Cache-cache</title>
 <style>
@@ -151,7 +157,7 @@ h1,h2,h3,p{margin:0}
 <div id="hud" class="layer hidden">
   <div id="dark" class="hidden"></div>
   <div class="hud-top">
-    <div class="grp hit"><button class="ib" id="bPause" aria-label="Pause">☰</button><button class="ib" id="bSnd" aria-label="Son">🔊</button></div>
+    <div class="grp hit"><button class="ib" id="bPause" aria-label="Pause">☰</button><button class="ib" id="bSnd" aria-label="Son">🔊</button><button class="ib" id="bFull" aria-label="Plein écran">⛶</button></div>
     <div class="hud-mid"><div id="timer">5:00</div><div style="display:flex;gap:6px"><div class="pill" id="lvl"></div><div class="pill" id="souvPill">💌 0/3</div></div></div>
     <div class="grp" style="flex-direction:column;align-items:flex-end;gap:6px"><div class="bar" aria-label="Énergie"><i id="hp"></i></div><div class="pill" id="helpsLeft">📞 3</div></div>
   </div>
@@ -704,11 +710,30 @@ function updateGfx(dt) {
 }
 const zoneAt = (x, z) => { const q = W.zones.find(q => x >= q.x1 && x <= q.x2 && z >= q.z1 && z <= q.z2); return q ? q.name : 'quelque part'; };
 
+/* plein écran : à appeler directement dans un geste (clic). Les iPhone n'ont pas cette API : il faut ajouter le jeu à l'écran d'accueil. */
+const FS_EL = document.documentElement, CAN_FS = !!(FS_EL.requestFullscreen || FS_EL.webkitRequestFullscreen);
+const STANDALONE = !!((window.matchMedia && matchMedia('(display-mode: standalone), (display-mode: fullscreen)').matches) || navigator.standalone);
+const isFull = () => !!(document.fullscreenElement || document.webkitFullscreenElement);
+function goFull() {
+  try {
+    if (!isFull()) { const p = FS_EL.requestFullscreen ? FS_EL.requestFullscreen({ navigationUI: 'hide' }) : FS_EL.webkitRequestFullscreen && FS_EL.webkitRequestFullscreen(); if (p && p.catch) p.catch(() => {}); }
+    if (screen.orientation && screen.orientation.lock) setTimeout(() => screen.orientation.lock('landscape').catch(() => {}), 150);
+  } catch (e) {}
+}
+function toggleFull() { if (isFull()) { try { (document.exitFullscreen || document.webkitExitFullscreen).call(document); } catch (e) {} } else if (CAN_FS) goFull(); else fullTip(); }
+function fullTip() {
+  const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  const m = modal(`<div class="who"><div style="font-size:42px;line-height:1">📲</div><div><h2 class="h2">Plein écran</h2></div></div>
+    <ul class="gl"><li>${ios ? 'Sur iPhone, le navigateur ne permet pas le plein écran directement.' : 'Ce navigateur ne permet pas le plein écran directement.'}</li>
+    <li>${ios ? '1. Appuie sur <b>Partager</b> (le carré avec la flèche).<br>2. Choisis <b>Sur l’écran d’accueil</b>.<br>3. Lance le jeu depuis la nouvelle icône : il s’ouvre en plein écran.' : 'Ouvre le menu du navigateur (⋮) et choisis <b>Ajouter à l’écran d’accueil</b>, puis lance le jeu depuis l’icône : il s’ouvre en plein écran.'}</li></ul>
+    <button class="btn wide" id="ok">Compris</button>`);
+  $('#ok', m).onclick = closeModals;
+}
 function startLevel(n) {
   cur = n; mode = 'loading'; showLoading(LEVELS[n - 1]);
   setTimeout(() => {
     buildWorld(n - 1); newRound(); $('#menu').classList.add('hidden'); $('#hud').classList.remove('hidden');
-    try { const el = document.documentElement; if (!document.fullscreenElement && el.requestFullscreen) el.requestFullscreen().catch(() => {}); if (screen.orientation && screen.orientation.lock) screen.orientation.lock('landscape').catch(() => {}); } catch (e) {}
+    goFull();
   }, 60);
 }
 /* difficulté : monte avec le niveau, et encore plus en mode difficile */
@@ -917,6 +942,7 @@ let mdrag = null; canvas.addEventListener('mousedown', e => { mdrag = { x: e.cli
 addEventListener('mousemove', e => { if (mdrag && mode === 'play' && cid === null) { P.yaw -= (e.clientX - mdrag.x) * .006; P.pitch = clamp(P.pitch + (e.clientY - mdrag.y) * .004, -.1, 1.1); mdrag = { x: e.clientX, y: e.clientY }; } });
 $('#bSearch').addEventListener('click', startSearch); $('#bJump').addEventListener('click', jump);
 $('#bHelp').addEventListener('click', openHelp); $('#bHint').addEventListener('click', showHints); $('#bPause').addEventListener('click', pauseMenu);
+$('#bFull').addEventListener('click', toggleFull);
 $('#bSnd').addEventListener('click', e => { S.muted = !S.muted; save(); applyMute(); e.currentTarget.textContent = S.muted ? '🔇' : '🔊'; });
 document.addEventListener('visibilitychange', () => { if (document.hidden && mode === 'play') pauseMenu(); });
 
@@ -968,7 +994,10 @@ function guide(onClose) {
     const gp = $('#gp', m), gs = $('#gs', m); if (gp) gp.onclick = () => { i--; sfx.tap(); draw(); }; if (gs) gs.onclick = done;
     $('#gn', m).onclick = () => { sfx.tap(); if (last) done(); else { i++; draw(); } };
   };
-  const done = () => { S.guided = true; save(); closeModals(); if (onClose) onClose(); };
+  const done = () => {
+    S.guided = true; save(); closeModals(); if (onClose) onClose();
+    else if (!CAN_FS && !STANDALONE && !S.fsTip) { S.fsTip = true; save(); setTimeout(fullTip, 300); }
+  };
   draw();
 }
 function pauseMenu() {
@@ -1062,11 +1091,11 @@ function toMenu() { closeModals(); G = null; $('#hud').classList.add('hidden'); 
 function renderMenu() {
   const menu = $('#menu'), next = S.done.findIndex(v => !v);
   menu.innerHTML = `<div class="top"><div class="brand"><h1 class="h1" style="font-size:clamp(34px,9vh,60px)">Cache-cache</h1><p class="muted">Yasmine cherche Iherim, déguisé en objet quelque part dans leurs lieux préférés. 5 cartes, des indices flous, aucune pitié.</p></div>
-    <div class="icons"><button class="ib" id="mJou" aria-label="Carnet de souvenirs">📖</button><button class="ib" id="mAlb" aria-label="Album">📸</button><button class="ib" id="mHow" aria-label="Aide">❓</button><button class="ib" id="mSnd" aria-label="Son">${S.muted ? '🔇' : '🔊'}</button></div></div>
+    <div class="icons"><button class="ib" id="mJou" aria-label="Carnet de souvenirs">📖</button><button class="ib" id="mAlb" aria-label="Album">📸</button><button class="ib" id="mHow" aria-label="Aide">❓</button><button class="ib" id="mFull" aria-label="Plein écran">⛶</button><button class="ib" id="mSnd" aria-label="Son">${S.muted ? '🔇' : '🔊'}</button></div></div>
     <div class="bot"><div id="cards">${LEVELS.map((L, i) => { const lock = i > 0 && !S.done[i - 1]; return `<button class="lcard ${lock ? 'lock' : ''} ${i === next ? 'now' : ''}" data-i="${i + 1}"><span class="e">${lock ? '🔒' : L.e}</span><small>Niveau ${L.id}</small><b>${L.name}</b><span class="st">${S.done[i] ? star(S.stars[i] || 1) : '&nbsp;'}</span><small>💌 ${S.souv[i].filter(Boolean).length}/3</small></button>`; }).join('')}</div>
     <div class="mrow"><span class="muted small">Joue en paysage · ${S.done.filter(Boolean).length}/5 trouvés · 🏆 ${S.best.reduce((a, b) => a + b, 0)} pts</span><div style="display:flex;gap:8px">${S.finale ? `<button class="btn ghost" id="mHard">🔥 Mode difficile : ${S.hard ? 'ON' : 'OFF'}</button>` : ''}${S.hardWins.every(Boolean) ? '<button class="btn ghost" id="mSec">💌 Lettre secrète</button>' : ''}${S.done.every(Boolean) ? '<button class="btn rose" id="mFin">🎁 Ma surprise</button>' : ''}</div></div></div>`;
-  menu.querySelectorAll('.lcard').forEach(b => b.onclick = () => { sfx.ok(); ac(); startLevel(+b.dataset.i); });
-  $('#mAlb', menu).onclick = album; $('#mJou', menu).onclick = journal;
+  menu.querySelectorAll('.lcard').forEach(b => b.onclick = () => { sfx.ok(); ac(); goFull(); startLevel(+b.dataset.i); });
+  $('#mAlb', menu).onclick = album; $('#mJou', menu).onclick = journal; $('#mFull', menu).onclick = toggleFull;
   $('#mHow', menu).onclick = () => guide();
   $('#mSnd', menu).onclick = e => { S.muted = !S.muted; save(); applyMute(); e.currentTarget.textContent = S.muted ? '🔇' : '🔊'; };
   const f = $('#mFin', menu); if (f) f.onclick = finale;
